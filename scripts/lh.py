@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import socket
 import sys
 import textwrap
@@ -31,6 +32,29 @@ ENV_TEMPLATE_KEYS = [
 ]
 
 MASK = "******"
+
+# Git Bash（MSYS2）会把它认为的 POSIX 绝对路径改写成 Windows 路径：
+#   /home/Agent/x -> E:/.../PortableGit/home/Agent/x
+#   /tmp/x        -> C:/Users/<user>/AppData/Local/Temp/x
+# 远端路径参数需要还原，否则会变成「本地找不到文件」。
+_MSYS_GIT_RE = re.compile(r"^[A-Za-z]:[\\/].*?[\\/](?:PortableGit|Git|msys64)[\\/](.+)$", re.I)
+_MSYS_TMP_RE = re.compile(
+    r"^[A-Za-z]:[\\/]Users[\\/][^\\/]+[\\/]AppData[\\/]Local[\\/]Temp[\\/](.+)$", re.I
+)
+
+
+def desquash_remote(path: str) -> str:
+    """还原 Git Bash 对远端绝对路径的改写。"""
+    if not path:
+        return path
+    normalized = path.replace("\\", "/")
+    match = _MSYS_GIT_RE.match(normalized)
+    if match:
+        return "/" + match.group(1)
+    match = _MSYS_TMP_RE.match(normalized)
+    if match:
+        return "/tmp/" + match.group(1)
+    return path
 
 
 # ---------------------------------------------------------------- 配置读取
@@ -305,10 +329,10 @@ def cmd_info(c: dict) -> int:
     return emit(rc, "", err)
 
 
-def cmd_exec(c: dict, command: str, as_json: bool) -> int:
+def cmd_exec(c: dict, command: str, as_json: bool, timeout: int = 120) -> int:
     client = connect(c)
     try:
-        rc, out, err = run_remote(client, command)
+        rc, out, err = run_remote(client, command, timeout=timeout)
     finally:
         client.close()
     if as_json:
@@ -416,6 +440,8 @@ def build_parser() -> argparse.ArgumentParser:
     e = sub.add_parser("exec", help="在服务器上执行命令")
     e.add_argument("command", help="要执行的命令")
     e.add_argument("--json", action="store_true", help="以 JSON 输出 rc/stdout/stderr")
+    e.add_argument("-t", "--timeout", type=int, default=120,
+                   help="命令超时秒数，默认 120（构建等长任务可调大）")
 
     def path_cmd(name, help_text):
         sp = sub.add_parser(name, help=help_text)
@@ -503,17 +529,18 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "info":
         return cmd_info(c)
     if args.cmd == "exec":
-        return cmd_exec(c, args.command, args.json)
+        return cmd_exec(c, args.command, args.json, args.timeout)
     if args.cmd == "tail":
-        return cmd_tail(c, args.path, args.lines)
+        return cmd_tail(c, desquash_remote(args.path), args.lines)
     if args.cmd == "upload":
-        return cmd_upload(c, args.local, args.remote)
+        return cmd_upload(c, args.local, desquash_remote(args.remote))
     if args.cmd == "download":
-        return cmd_download(c, args.remote, args.local)
+        return cmd_download(c, desquash_remote(args.remote), args.local)
 
     if args.cmd in SIMPLE_COMMANDS:
         template = SIMPLE_COMMANDS[args.cmd]
-        command = template.replace("{path}", sh_quote(getattr(args, "path", "")))
+        remote_path = desquash_remote(getattr(args, "path", ""))
+        command = template.replace("{path}", sh_quote(remote_path))
         client = connect(c)
         try:
             rc, out, err = run_remote(client, command)

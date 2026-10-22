@@ -71,6 +71,7 @@ python scripts/lh.py doctor
 python scripts/lh.py env                    # 当前配置（密码脱敏）
 python scripts/lh.py info                   # 主机概览
 python scripts/lh.py exec "uptime"          # 执行命令
+python scripts/lh.py exec -t 600 "docker compose build"   # 长任务调大超时
 python scripts/lh.py exec "df -h" --json    # JSON 输出
 python scripts/lh.py ls /var/log            # 列目录
 python scripts/lh.py cat /etc/os-release    # 读文件
@@ -107,6 +108,7 @@ Windows：`%USERPROFILE%\.workbuddy\skills\tencent-lighthouse`
 | 现象 | 处理 |
 | --- | --- |
 | 连接超时 | 实例是否开机；防火墙/安全组是否放通 22 端口 |
+| 远端路径报 `No such file` | Git Bash 会把 `/home/x` 改写成 `C:/.../PortableGit/home/x`，脚本已自动还原；仍异常时加 `MSYS_NO_PATHCONV=1` |
 | `Authentication failed` | 用户名与镜像不匹配，或密码错误（控制台重置） |
 | `No module named paramiko` | `python -m pip install -r scripts/requirements.txt` |
 | 中文乱码 | 脚本已强制 UTF-8；终端执行 `chcp 65001` |
